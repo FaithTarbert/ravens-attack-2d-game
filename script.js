@@ -11,6 +11,8 @@ const collisionCtx = collisionCanvas.getContext('2d');
 collisionCanvas.width = window.innerWidth;
 collisionCanvas.height = window.innerHeight;
 
+//game over var
+let gameOver = false;
 //track player score
 let score = 0;
 //score font size
@@ -64,12 +66,15 @@ class Raven {
         this.timeSinceFlap = 0;
         //randomize each sprite's frame/flap interval (time between frame shifts) between 50 & 100 ms
         this.flapInterval = Math.random() * 50 + 50;
-        //for color collision detection - set random color whole nums between 0-255 (max color channels)
+        //for rgb color collision detection - set 3 random color whole nums between 0-255 (max rbg color channel range 255). This picks 3 random colors.
         this.randomColors = [Math.floor(Math.random() * 255), Math.floor(Math.random() * 255), Math.floor(Math.random() * 255)];
+        //assign the 3 random rbg channel colors to a property for use in drawing on collision canvas in draw()
         this.color = `rgb(${this.randomColors[0]}, ${this.randomColors[1]}, ${this.randomColors[2]})`;
-
+        //calls random num between 0 and 1 and evaluates whether greater than .5 - use this to randomize which ravens have particle trails
+        this.hasTrail = Math.random() > 0.05;
     }
-    //moves sprite around and adjusts any values before draw next frame
+
+    //moves raven sprite around and adjusts any values before draw next frame
     //draws sprite on canvas - deltaTime passed from animate(), raven update()
     update(deltaTime) {
         //to limit sprite vertical movements to stay on screen/bounce off screen edge
@@ -94,7 +99,17 @@ class Raven {
             else this.frame++;
             //reset frame timer
             this.timeSinceFlap = 0;
+            //check raven for has particle trail value of true from raven class
+            if (this.hasTrail) {
+                //running a loop 5x adds 5 particles everytime vs just one
+                for (let i = 0; i < 5; i++) {
+                    //call particle trail constructor and push into particles array
+                    particles.push(new Particle(this.x, this.y, this.width, this.color));
+                }
+            }
         }
+        //handle game over if any raven passes left edge of screen
+        if (this.x < 0 - this.width) gameOver = true;
     }
 
     draw() {
@@ -104,29 +119,140 @@ class Raven {
         collisionCtx.fillRect(this.x, this.y, this.width, this.height);
         //this takes between 3-9 inputs: min is image and where to draw x/y. Optional: coordinate-x/coordinate-y/coordinate-w/coordinate-h (sets where to crop spritesheet to extract one frame - start at top left corner which is 0, 0 - then over sprite width and down sprite height). Finally, sprite width/height (optional). Creates fixed sprite using 0,0 (one frame).
         // ctx.drawImage(this.image, 0, 0, this.spriteWidth, this.spriteHeight, this.x, this.y, this.width, this.height);
-        //this replaces 0,0, with frames moving right (from spritesheet)
+        //this replaces 0,0, with frames moving right (from spritesheet). We keep the second zero because there is only one row of sprites
         ctx.drawImage(this.image, this.frame * this.spriteWidth, 0, this.spriteWidth, this.spriteHeight, this.x, this.y, this.width, this.height);
     }
 }
 
-//function to track score on canvas
+//handles both visual/audio cloud image explosion using sprite sheet/audio file when ravens clicked/hit
+let explosions = [];
+class Explosion {
+    //passed 3 external values
+    constructor(x, y, size) {
+        this.image = new Image();
+        this.image.src = 'boom.png';
+        this.spriteWidth = 200;
+        this.spriteHeight = 179;
+        this.size = size;
+        this.x = x;
+        this.y = y;
+        //frame tracks which sprite sheet frame to display
+        this.frame = 0;
+        this.sound = new Audio();
+        this.sound.src = 'boom.wav';
+        //to track deltaTime for frame speed
+        this.timeSinceLastFrame = 0;
+        //timer for explosion animation frames in ms
+        this.frameInterval = 200;
+        this.markedForDeletion = false;
+    }
+
+    //handle audio and explosion display/frame speed based on delta time
+    update(deltaTime) {
+        //play sound if explosion sprite sheet frame is at first frame
+        if (this.frame === 0) this.sound.play();
+        //increase frame count from 0 by deltaTime count
+        this.timeSinceLastFrame += deltaTime;
+        //if time exceeds set interval, move sprite sheet count/frame right
+        if (this.timeSinceLastFrame > this.frameInterval) {
+            this.frame++
+            //reset timer
+            this.timeSinceLastFrame = 0;
+            //if we exceed num of sprite sheet frames, delete
+            if (this.frame > 5) this.markedForDeletion = true;
+        }
+    }
+    draw() {
+        //tells draw where to crop sprite sheet image and then where to display on canvass using x/y/size (width/height). this.y - this.size/4 adjusts explosion animation vertical coordinate
+        ctx.drawImage(this.image, this.frame * this.spriteWidth, 0, this.spriteWidth, this.spriteHeight, this.x, this.y - this.size / 4, this.size, this.size);
+    }
+}
+
+//add particle trail to some raven sprites, based on their size/hit box color
+let particles = [];
+class Particle {
+    constructor(x, y, size, color) {
+        this.size = size;
+        //these coordinates define where start of particle trail relative to raven is - adjust division factor to move it around - random moves the point around slightly for more variation
+        this.x = x + this.size / 2 + Math.random() * 50 - 25;
+        this.y = y + this.size / 3 + Math.random() * 50 - 25;
+        //set starting particle circle size but smaller than sprite size
+        this.radius = Math.random() * this.size / 10;
+        //set random max particle opacity between 35-55px as circles grows
+        this.maxRadius = Math.random() * 20 + 35;
+        this.markedForDeletion = false;
+        //horizontal forward speed between .5 - 1.5
+        this.speedX = Math.random() * 1 + 0.5;
+        this.color = color;
+    }
+    //will move particles horizontally
+    update() {
+        this.x += this.speedX;
+        //size to increase radious each frame - how fast/long particle trail grows - larger number grows faster
+        this.radious += 0.03;
+        //the -5 marks the particles a hair sooner so they don't flicker at the end of the trail
+        if (this.radius > this.maxRadius - 5) this.markedForDeletion = true;
+    }
+    //render particles to canvas
+    draw() {
+        //save and restore wrapped around this draw method keeps global canvas effects limited to this layer only
+        ctx.save();
+        //set particle transparency from solid to fade. As this.radius grows to reach same size of maxRadius ie 30/30, the equation would evaluate to 1 - 1, making the transparency zero/clear.
+        ctx.setGlobalAlpha = 1 - this.radius / this.maxRadius;
+        //begin draw circle
+        ctx.beginPath();
+        //fill with raven color
+        ctx.fillStyle = this.color;
+        //draw circle formula
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        //fill circle with color
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+//function to track/draw score on canvas
 function drawScore() {
     //shadow layer
     ctx.fillStyle = 'black';
-    //50, 75 are coordinates to draw score
+    //50, 75 are coordinates of where to draw score
     ctx.fillText('Score: ' + score, 50, 75)
     //white text, offset slightly
     ctx.fillStyle = 'white';
     ctx.fillText('Score: ' + score, 55, 80)
 }
+//function to track/draw gameover text/score
+function drawGameOver() {
+    //center text on canvas
+    ctx.textAlign = 'center';
+    //shadow layer
+    ctx.fillStyle = 'black';
+    //50, 75 are coordinates of where to draw score
+    ctx.fillText('GAME OVER! Your Score is ' + score, canvas.width / 2, canvas.height / 2)
+    //white text, offset slightly by 5 px
+    ctx.fillStyle = 'white';
+    ctx.fillText('GAME OVER! Your Score is ' + score, canvas.width / 2 + 5, canvas.height / 2 + 5)
+}
 
 //add window event listener to collision canvas - event listener by color collision
 window.addEventListener('click', function (e) {
+    //grab the color where clicked 1px x 1px...
     const detectPixelColor = collisionCtx.getImageData(e.x, e.y, 1, 1);
-    console.log(detectPixelColor);
+    //.data is a canvas method that holds the 3 rbg color values selected on the collision canvas
+    const pixelColor = detectPixelColor.data;
+    //iterate the raven array and check their hit box color against the clicked color
+    ravens.forEach(raven => {
+        //if there's a match, mark the raven for deletion - there was a click/hit!
+        if (raven.randomColors[0] === pixelColor[0] && raven.randomColors[1] === pixelColor[1] && raven.randomColors[2] === pixelColor[2]) {
+            raven.markedForDeletion = true;
+            score++;
+            //add explosions to array and pass the coordinates & size of raven to explosion class for creation and animation
+            explosions.push(new Explosion(raven.x, raven.y, raven.width));
+        }
+    })
 })
 
-//this is the function that animates
+//this is the function that animates the ravens
 //timestamp = milliseconds, 1000=1 sec. Timestamp is passed to c/b reqeuestAnimationFrame(animate) by default js behaviour. It is used to measure deltaTime/fps speed
 function animate(timestamp) {
     //clear prev drawings from entire game canvas coordinates
@@ -149,16 +275,23 @@ function animate(timestamp) {
             return a.width - b.width;
         })
     }
-    //call draw score before ravens animate, so core will layer behind them
+
+    //call draw score before ravens animate, so score will layer behind them
     drawScore();
-    //spread ravens arr into new array and cycle thru each one, calling update() and draw(). Pass deltaTime thru for varying frame rate in draw()
-    [...ravens].forEach(raven => raven.update(deltaTime));
-    [...ravens].forEach(raven => raven.draw());
+
+    //spread ravens arr into new array and cycle thru each one, calling update() and draw(). Pass deltaTime to control frame display rate in draw(). The order the arrays are called determins the order they are drawn. Particles occurr first so they appear behind the ravens.
+    [...particles, ...ravens, ...explosions].forEach(raven => raven.update(deltaTime));
+    [...particles, ...ravens, ...explosions].forEach(raven => raven.draw());
     //creates new array removing sprites marked for deletion
     ravens = ravens.filter(raven => !raven.markedForDeletion)
+    //creates new array removing explosions marked for deletion
+    explosions = explosions.filter(explosion => !explosion.markedForDeletion)
+    //creates new array removing particle trails marked for deletion
+    particles = particles.filter(particle => !particle.markedForDeletion)
 
-    //creates endless running loop to animate frame by frame
-    requestAnimationFrame(animate)
+    //built in method which creates endless loop to animate frame by frame, as long as gameover condition is still set to false
+    if (!gameOver) requestAnimationFrame(animate)
+    else drawGameOver();
 }
-//pass starting timestamp for deltatime calc as zero to prevent errors
+//set starting deltaTime count to zero to prevent errors
 animate(0)

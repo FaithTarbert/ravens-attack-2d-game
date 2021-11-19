@@ -1,8 +1,20 @@
+//primary game canvas
 const canvas = document.getElementById('canvas1');
 //ctx = context
 const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
+
+//canvas for color collision detection
+const collisionCanvas = document.getElementById('collisionCanvas');
+const collisionCtx = collisionCanvas.getContext('2d');
+collisionCanvas.width = window.innerWidth;
+collisionCanvas.height = window.innerHeight;
+
+//track player score
+let score = 0;
+//score font size
+ctx.font = '40px Impact';
 
 //in milliseconds - part of delta time calc to equalize animation speed regardless of a computer's frames-per-second speed
 let timeToNextRaven = 0;
@@ -52,6 +64,10 @@ class Raven {
         this.timeSinceFlap = 0;
         //randomize each sprite's frame/flap interval (time between frame shifts) between 50 & 100 ms
         this.flapInterval = Math.random() * 50 + 50;
+        //for color collision detection - set random color whole nums between 0-255 (max color channels)
+        this.randomColors = [Math.floor(Math.random() * 255), Math.floor(Math.random() * 255), Math.floor(Math.random() * 255)];
+        this.color = `rgb(${this.randomColors[0]}, ${this.randomColors[1]}, ${this.randomColors[2]})`;
+
     }
     //moves sprite around and adjusts any values before draw next frame
     //draws sprite on canvas - deltaTime passed from animate(), raven update()
@@ -82,8 +98,10 @@ class Raven {
     }
 
     draw() {
-        //strokeRect/fillRect outlines or fills sprite frame while building/testing
-        ctx.strokeRect(this.x, this.y, this.width, this.height);
+        //fill raven hitbox with random color calculated in raven class on HIT CANVAS
+        collisionCtx.fillStyle = this.color;
+        //strokeRect/fillRect outlines or fills sprite frame while building/testing on HIT CANVAS
+        collisionCtx.fillRect(this.x, this.y, this.width, this.height);
         //this takes between 3-9 inputs: min is image and where to draw x/y. Optional: coordinate-x/coordinate-y/coordinate-w/coordinate-h (sets where to crop spritesheet to extract one frame - start at top left corner which is 0, 0 - then over sprite width and down sprite height). Finally, sprite width/height (optional). Creates fixed sprite using 0,0 (one frame).
         // ctx.drawImage(this.image, 0, 0, this.spriteWidth, this.spriteHeight, this.x, this.y, this.width, this.height);
         //this replaces 0,0, with frames moving right (from spritesheet)
@@ -91,12 +109,30 @@ class Raven {
     }
 }
 
+//function to track score on canvas
+function drawScore() {
+    //shadow layer
+    ctx.fillStyle = 'black';
+    //50, 75 are coordinates to draw score
+    ctx.fillText('Score: ' + score, 50, 75)
+    //white text, offset slightly
+    ctx.fillStyle = 'white';
+    ctx.fillText('Score: ' + score, 55, 80)
+}
+
+//add window event listener to collision canvas - event listener by color collision
+window.addEventListener('click', function (e) {
+    const detectPixelColor = collisionCtx.getImageData(e.x, e.y, 1, 1);
+    console.log(detectPixelColor);
+})
 
 //this is the function that animates
 //timestamp = milliseconds, 1000=1 sec. Timestamp is passed to c/b reqeuestAnimationFrame(animate) by default js behaviour. It is used to measure deltaTime/fps speed
 function animate(timestamp) {
-    //clear prev drawings from entire canvas coordinates
+    //clear prev drawings from entire game canvas coordinates
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+    //clear prev drawings from entire collision canvas coordinates
+    collisionCtx.clearRect(0, 0, canvas.width, canvas.height)
 
     //deltatime = diff between frame timestamps in ms
     let deltaTime = timestamp - lastTime;
@@ -108,7 +144,13 @@ function animate(timestamp) {
         ravens.push(new Raven())
         //reset timer
         timeToNextRaven = 0;
+        //sort ravens array based on ascending width (small to large/small behind, larger in front)
+        ravens.sort(function (a, b) {
+            return a.width - b.width;
+        })
     }
+    //call draw score before ravens animate, so core will layer behind them
+    drawScore();
     //spread ravens arr into new array and cycle thru each one, calling update() and draw(). Pass deltaTime thru for varying frame rate in draw()
     [...ravens].forEach(raven => raven.update(deltaTime));
     [...ravens].forEach(raven => raven.draw());
